@@ -1,0 +1,8 @@
+cat << EOF > Dockerfile
+FROM openjdk:8-jre
+COPY target/*SNAPSHOT-exec.jar app.jar
+#ENV JAVA_OPTS -Dspring.profiles.active=hs
+CMD ["java","-Dspring.profiles.active=portal","-jar","app.jar"]
+EXPOSE 8081
+EOF
+
