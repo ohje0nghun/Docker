@@ -1,0 +1,128 @@
+pipeline{
+    parameters {
+        string(name: 'tag', defaultValue: 'latest', description: 'tag {YYYYMMDD}-{HHMMSS}')
+        string(name: 'buildtag', defaultValue: 'v1', description: 'tag {YYYYMMDD}-{HHMMSS}')
+        booleanParam(name: 'VERBOSE', defaultValue: false, description: '')
+    }
+    enviroment {
+        // [신규]
+        PIPLINE_JOB = 'dev-tap-portal-front-user'
+        APP_NAME = 'portal-front-user'
+        JENKINS = 'devjenkins'
+        CI_COMMIT_BRANCH = 'devmaster'
+        LATEST = 'latest'
+        VERBOSE=FLAG = '-q'
+        // [2] DOCKER 이미지 : NEXUS PUSH 정보
+        NEXUS-IMAGE_REGISTRY =  '10.37.68.122:8282'
+        NEXUS_IMAGE_REPO = "${NEXUS_IMAGE_REGISTRY}/tap-portal-front-user"
+        TEST = "/nfsfile/work/devjenkins/workspace/dev-tap-portal-front-user/node_modules"
+    }
+    agent { label 'master' }
+    stages{
+        /*
+        * 설명 : yarn 빌드 수행 
+        */
+        stage('yarn Build'){
+            steps{
+                script {
+                    echo "-------------"
+                    echo "[yarn Build 수행]"
+                    echo "-------------"
+                    sh "yarn cache clean -f"
+                    sh "cd ${WORKSPACE}"
+                    sh "ls -al"
+                    // sh "rm -rf ./node_modules_new.tar"
+                    // sh "ls -al"
+                    sh "yarn config set yarn-offline-mirror ./node_modules"
+                    sh "yarn config set yarn-offline-mirror-pruning true"
+                    dir("node_modules"){
+                        sh "ls -l"
+                        // sh "find . ! -name npm_package.tar -delete"
+                        // sh "tar xvf npm_package.tar"
+                        // sh "ls -l"
+                    }
+                    dir("node_modules/node_modules"){
+                        // sh "ls -l"
+                        // sh "mv * ../"
+                    }
+                    sh "yarn --offline --production"
+                    sh "ls -al"
+                    sh "yarn build"
+                }
+            }
+        }
+    }
+    stage('Docker Image 빌드 & Nexus Push'){
+        steps{
+            script {
+                echo "-------------------"
+                echo "[Docker Image 빌드 & Nexus Push 수행]"
+                echo "-------------------"
+                sh "cd ${WORKSPACE}/target"
+                sh "ls -l"
+                dir("target"){
+                    sh "ls -l"
+                    sh "docker build -t "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH_"-"+currentBuild.number+" ."
+                    sh "docker tag "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number +" "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+LATEST
+                    sh "docker images"
+                }
+                //sh "docker images"
+                //sh "docker build -t "+NEXUS+IMAGE+REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number+" ."
+                //sh "docker build -t "+NEXUS_IMAGE+REPO+":"+CI_COMMIT_BRANCH_"-"+currentBuild.number+" -f Dockerfile_dev"
+                //sh "docker push " + AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number
+                //sh "echo "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+LATEST
+                docker.withRegistry("http://"+NEXUS_IMAGE_REGISTRY){
+                    // dockerImage = docker.build(NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number)
+                    // dockerImage.push(NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number)
+                    // docker.push(NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number)
+                    // docker.push(NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+LATEST)
+                }
+            }
+        }
+    }
+    stage('EC2 Push'){
+        steps{
+            script{
+                echo "------------"
+                echo "[EC2 Push 수행]"
+                echo "------------"
+                sh "docker tag "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number+" "+AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number
+                sh "docker tag "+AWS_ECR_REPO +":"+CI_COMMIT_BRANCH+"-"+currentBuild.number+" "+AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+LATEST
+                // 수동배포 로직(start)
+                sh "docker save "+AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number*" > "+SERVICE_CODE+".tar"
+                sshagent(credentials:['devjenkins-tap-key']){
+                    sh "ssh -o 'StrictHostKeyChecking no' devjenkins@10.141.49.224 rm -rf /ec2/" + SERVICE_CODE + "/dockerimage/"+SERVICE_CODE+".tar"
+                    sh "scp " + SERVICE_CODE + ".tar" + " devjenkins@10.141.49.224:/ec2/" + SERVICE_CODE + "/dockerimage/"+SERVICE_CODE+".tar"
+                    //sh "ssh devjenkins@10.141.49.224 '/eks/shell/eksdeploy.sh '" + SERVICE_CODE + " " + APP_NAME + " " + currentBuild.number
+                    //sh "rm -rf "+SERVICE_CODE+".tar"
+                }
+                // 수동배포 로직(end)
+                //echo "docker ecr login"
+                //sh "aws ecr get-login-password --region ap-northeast-2 --endpoint-url " + AWS_ECR_API + " | docker login --username " + AWS_ECR_USERNAME + " --password-stdin" + AWS_ECR_REGISTRY
+                //echo "docker ecr push"
+                //sh "docker push " + AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number
+                //sh "docker push " + AWS_ECR_REPO+":"+CI_COMMIT_BRANCH+"-"+LATEST
+                sh "docker rmi "+NEXUS_IMAGE_REPO+":"+CI_COMIT_BRANCH+"-"+currentBuild.number
+                sh "docker rmi "+NEXUS_IMAGE_REPO+":"+CI_COMIT_BRANCH+"-"+LATEST
+                sh "docker rmi "+AWS_ECR_REPO +":"+CI_COMMIT_BRANCH+"-"+currentBuild.number
+                sh "docker rmi "+AWS_ECR_REPO +":"+CI_COMMIT_BRANCH+"-"LATEST
+            }
+        }
+        post {
+            success {
+                echo 'success'
+            }
+            failure {
+                echo "Pipeline failed"
+                sh "docker rmi "+NEXUS_IMAGE_REPO+":"+CI_COMMIT_BRANCH+"-"+currentBuild.number
+                sh "docker rmi "+NEXUS_IMAGE_REPO+":"+CI_COMIT_BRANCH+"-"+LATEST
+                sh "docker rmi "+AWS_ECR+REPO +":"+CI_COMIT_BRANCH+"-"+currentBuild.number
+                sh "docker rmi "+AWS_ECR_REPO +":"+CI_COMIT_BRANCH+"-"+LATEST
+            }
+        }     
+    }
+}
+
+
+
+
