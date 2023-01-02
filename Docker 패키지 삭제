@@ -1,0 +1,30 @@
+*Docker 삭제
+
+docker stop $(docker ps -q) // docker container 중지
+docker rm $(docker ps -a -q) // docker container 삭제
+
+docker rmi $(docker images -q) // docker image 삭제
+systemctl stop docker.service && systemctl stop containerd.service
+yum list installed | grep docker // 설치된 docker 관련 패키지 확인
+yum erase {yum package} // docker package 삭제 
+
+cd /var/lib/docker
+rm -rf *
+
+cd /var/run
+rm docker.sock docker.pid
+rm -rf docker
+
+
+*Docker rpm 설치
+$docker ps //실행되고 있는 컨테이너 확인(없어야함)
+
+$systemctl stop docker // docker 서비스 중지
+
+$yum list docker-ce --showduplicates | sort -r // 설치가능 버전 리스트 확인
+
+$yum install docker-ce-18.09.3-3.el7.x86_64.rpm docker-ce-cli-18.09.3-3.el7.x86_64.rpm containerd.io-1.4.3-3.1.el7.x86_64.rpm // 다운받은 rpm으로 docker 업데이트
+
+$systemctl start docker && systemctl enable docker // docker 서비스 시작 
+
+$docker version // docker 버전확인
